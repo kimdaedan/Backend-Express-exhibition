@@ -1,0 +1,24 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL") // This reads the address from your .env file
+}
+
+model Karya {
+  id          Int      @id @default(autoincrement())
+  title       String
+  prodi       String
+  description String?  // The '?' means this field is optional
+
+  upload_type String   // Will store 'file' or 'youtube'
+  file_path   String?
+  youtube_url String?
+
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+}
