@@ -13,12 +13,13 @@ model Karya {
   id          Int      @id @default(autoincrement())
   title       String
   prodi       String
-  description String?  // The '?' means this field is optional
-
-  upload_type String   // Will store 'file' or 'youtube'
+  nama_ketua  String?
+  nim         String?
+  description String?
+  upload_type String
   file_path   String?
   youtube_url String?
-
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
+  status      String   @default("Pending")
 }
