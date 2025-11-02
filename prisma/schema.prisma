@@ -23,3 +23,12 @@ model Karya {
   updated_at  DateTime @updatedAt
   status      String   @default("Pending")
 }
+
+model User {
+  id         Int      @id @default(autoincrement())
+  nama       String
+  nim        String   @unique // NIM harus unik untuk login
+  prodi      String
+  password   String   // Kita akan simpan password yang sudah di-hash
+  created_at DateTime @default(now())
+}

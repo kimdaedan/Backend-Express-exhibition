@@ -1,28 +1,25 @@
 const express = require('express');
 const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
-const multer = require('multer'); // <-- BARU
-const path = require('path');     // <-- BARU
+const multer = require('multer');
+const path = require('path');
+const bcrypt = require('bcrypt'); // <-- PASTIKAN INI ADA
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = 4000;
 
 app.use(cors({ origin: 'http://localhost:3000' }));
-app.use(express.json()); // Tetap ada untuk endpoint lain
+app.use(express.json()); // Penting untuk membaca JSON dari body
 
-// --- BARU: Menyajikan file statis ---
-// Ini akan membuat file di 'public/uploads' bisa diakses
-// dari URL: http://localhost:4000/uploads/NAMA_FILE
+// --- Konfigurasi File Statis & Multer ---
 app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 
-// --- BARU: Konfigurasi Multer untuk penyimpanan file ---
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, 'public/uploads/'); // Tentukan folder penyimpanan
+    cb(null, 'public/uploads/');
   },
   filename: function (req, file, cb) {
-    // Buat nama file unik agar tidak tumpang tindih
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, uniqueSuffix + path.extname(file.originalname));
   }
@@ -30,12 +27,11 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-// --- API ENDPOINTS ---
+// --- API ENDPOINTS (KARYA & PAMERAN) ---
 
-// GET exhibitions (Now using hardcoded data again)
-app.get('/api/exhibitions', (req, res) => { // Removed 'async'
+// GET exhibitions (Hardcoded)
+app.get('/api/exhibitions', (req, res) => {
   try {
-    // Re-added the hardcoded data
     const exhibitions = [
         { id: 1, image: '/exhibitions/informatika.jpg', title: 'Prodi D3 Teknik Informatika', organizer: 'IF', link: '/gallery' },
         { id: 2, image: '/exhibitions/multimedia.jpg', title: 'Prodi D4 Teknologi Rekayasa Multimedia', organizer: 'MM', link: '/multimedia' },
@@ -46,7 +42,6 @@ app.get('/api/exhibitions', (req, res) => { // Removed 'async'
         { id: 7, image: '/exhibitions/game.jpg', title: 'Prodi D4 Teknik Permainan', organizer: 'GAME', link: '#' },
         { id: 8, image: '/exhibitions/robotika.jpg', title: 'Prodi D4 Teknologi Rekayasa Mekatronika', organizer: 'MEKA', link: '#' },
     ];
-
     res.json(exhibitions);
   } catch (error) {
     console.error("Error fetching exhibitions (using static data):", error);
@@ -54,7 +49,7 @@ app.get('/api/exhibitions', (req, res) => { // Removed 'async'
   }
 });
 
-// Endpoint for landing page (Tetap sama)
+// GET landing page
 app.get('/api/landing-page', (req, res) => {
   const landingData = {
     title: "Selamat Datang di Pameran Virtual",
@@ -64,18 +59,13 @@ app.get('/api/landing-page', (req, res) => {
   res.json(landingData);
 });
 
-// --- DIPERBARUI: Endpoint untuk saving new artwork ---
-// Kita tambahkan middleware 'upload.single('file')'
-// 'file' adalah nama field dari FormData di frontend
+// POST karya baru (dengan upload file)
 app.post('/api/karya', upload.single('file'), async (req, res) => {
   try {
-    // Data teks sekarang ada di 'req.body'
     const { title, selectedProdi, description, uploadType, youtubeLink, namaKetua, nim } = req.body;
-
-    // Data file (jika ada) ada di 'req.file'
     let filePath = null;
     if (uploadType === 'file' && req.file) {
-      filePath = req.file.filename; // <-- Kita simpan nama file unik yang baru
+      filePath = req.file.filename;
     }
 
     const karyaBaru = await prisma.karya.create({
@@ -86,8 +76,9 @@ app.post('/api/karya', upload.single('file'), async (req, res) => {
         nim: nim,
         description: description,
         upload_type: uploadType,
-        file_path: filePath, // <-- Simpan nama file baru ke DB
+        file_path: filePath,
         youtube_url: uploadType === 'youtube' ? youtubeLink : null,
+        // status: "Pending" (ini sudah di-handle oleh @default di schema.prisma)
       },
     });
     console.log('Data baru berhasil disimpan:', karyaBaru);
@@ -98,8 +89,7 @@ app.post('/api/karya', upload.single('file'), async (req, res) => {
   }
 });
 
-
-// GET semua karya (Tetap sama)
+// GET semua karya
 app.get('/api/karya', async (req, res) => {
   try {
     const allKarya = await prisma.karya.findMany({
@@ -114,23 +104,22 @@ app.get('/api/karya', async (req, res) => {
   }
 });
 
-// --- ENDPOINT BARU UNTUK UPDATE STATUS ---
+// PATCH status karya
 app.patch('/api/karya/:id/status', async (req, res) => {
   try {
-    const { id } = req.params; // Ambil ID dari URL
-    const { status } = req.body; // Ambil status baru ("Disetujui" / "Ditolak") dari body
+    const { id } = req.params;
+    const { status } = req.body;
 
-    // Validasi status
     if (!status || !['Disetujui', 'Ditolak'].includes(status)) {
       return res.status(400).json({ error: 'Status tidak valid.' });
     }
 
     const updatedKarya = await prisma.karya.update({
       where: {
-        id: parseInt(id), // Pastikan ID adalah angka
+        id: parseInt(id),
       },
       data: {
-        status: status, // Update kolom status
+        status: status,
       },
     });
 
@@ -141,6 +130,78 @@ app.patch('/api/karya/:id/status', async (req, res) => {
   }
 });
 
+// --- BARU: API ENDPOINT OTENTIKASI (LOGIN/REGISTER) ---
+
+// 1. ENDPOINT REGISTER
+app.post('/api/register', async (req, res) => {
+  const { nama, nim, prodi, password } = req.body;
+
+  if (!nama || !nim || !prodi || !password) {
+    return res.status(400).json({ error: 'Semua field wajib diisi.' });
+  }
+
+  try {
+    const existingUser = await prisma.user.findUnique({
+      where: { nim: nim },
+    });
+
+    if (existingUser) {
+      return res.status(400).json({ error: 'NIM sudah terdaftar.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const newUser = await prisma.user.create({
+      data: {
+        nama: nama,
+        nim: nim,
+        prodi: prodi,
+        password: hashedPassword,
+      },
+    });
+
+    const { password: _, ...userWithoutPassword } = newUser;
+    res.status(201).json({ message: 'Pendaftaran berhasil!', user: userWithoutPassword });
+
+  } catch (error) {
+    console.error("Gagal mendaftar:", error);
+    res.status(500).json({ error: 'Gagal membuat akun di database.' });
+  }
+});
+
+// 2. ENDPOINT LOGIN
+app.post('/api/login', async (req, res) => {
+  const { nim, password } = req.body;
+
+  if (!nim || !password) {
+    return res.status(400).json({ error: 'NIM dan password wajib diisi.' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { nim: nim },
+    });
+
+    if (!user) {
+      return res.status(401).json({ error: 'NIM atau password salah.' });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'NIM atau password salah.' });
+    }
+
+    const { password: _, ...userWithoutPassword } = user;
+    res.status(200).json({ message: 'Login berhasil!', user: userWithoutPassword });
+
+  } catch (error) {
+    console.error("Gagal login:", error);
+    res.status(500).json({ error: 'Terjadi error di server.' });
+  }
+});
+
+// --- Menjalankan Server ---
 app.listen(PORT, () => {
   console.log(`🚀 Server backend berjalan di http://localhost:${PORT}`);
 });
