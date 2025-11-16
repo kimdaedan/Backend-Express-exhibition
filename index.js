@@ -3,7 +3,7 @@ const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
 const multer = require('multer');
 const path = require('path');
-const bcrypt = require('bcrypt'); // <-- PASTIKAN INI ADA
+const bcrypt = require('bcrypt'); // Pastikan ini sudah di-instal (npm install bcrypt)
 
 const app = express();
 const prisma = new PrismaClient();
@@ -13,8 +13,12 @@ app.use(cors({ origin: 'http://localhost:3000' }));
 app.use(express.json()); // Penting untuk membaca JSON dari body
 
 // --- Konfigurasi File Statis & Multer ---
+// Menyajikan file yang di-upload (dari 'public/uploads')
 app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
+// Menyajikan file model 3D (dari 'public/models')
+app.use('/models', express.static(path.join(__dirname, 'public/models')));
 
+// Konfigurasi Multer (penyimpanan file)
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, 'public/uploads/');
@@ -27,7 +31,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-// --- API ENDPOINTS (KARYA & PAMERAN) ---
+// --- API ENDPOINTS (PAMERAN & KARYA) ---
 
 // GET exhibitions (Hardcoded)
 app.get('/api/exhibitions', (req, res) => {
@@ -89,10 +93,20 @@ app.post('/api/karya', upload.single('file'), async (req, res) => {
   }
 });
 
-// GET semua karya
+// GET semua karya (dengan filter)
 app.get('/api/karya', async (req, res) => {
   try {
+    const { prodi, status } = req.query;
+    let whereClause = {};
+    if (prodi) {
+      whereClause.prodi = decodeURIComponent(prodi);
+    }
+    if (status) {
+      whereClause.status = decodeURIComponent(status);
+    }
+
     const allKarya = await prisma.karya.findMany({
+      where: whereClause,
       orderBy: {
         created_at: 'desc',
       },
@@ -130,7 +144,36 @@ app.patch('/api/karya/:id/status', async (req, res) => {
   }
 });
 
-// --- BARU: API ENDPOINT OTENTIKASI (LOGIN/REGISTER) ---
+// --- BARU: ENDPOINT UNTUK MENGHAPUS KARYA ---
+app.delete('/api/karya/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // TODO: Hapus file terkait dari 'public/uploads' jika ada
+    // const karya = await prisma.karya.findUnique({ where: { id: parseInt(id) } });
+    // if (karya && karya.file_path) {
+    //   const fs = require('fs');
+    //   fs.unlinkSync(path.join(__dirname, 'public/uploads', karya.file_path));
+    // }
+
+    // Hapus karya dari database
+    await prisma.karya.delete({
+      where: {
+        id: parseInt(id),
+      },
+    });
+
+    res.status(200).json({ message: 'Karya berhasil dihapus.' });
+  } catch (error) {
+    console.error("Gagal menghapus karya:", error);
+    if (error.code === 'P2025') {
+      return res.status(404).json({ error: 'Karya tidak ditemukan.' });
+    }
+    res.status(500).json({ error: 'Gagal menghapus karya di database.' });
+  }
+});
+
+// --- API ENDPOINT OTENTIKASI (LOGIN/REGISTER) ---
 
 // 1. ENDPOINT REGISTER
 app.post('/api/register', async (req, res) => {
